@@ -18,3 +18,26 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+
+  http-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Run HTTP smoke against isolated local storage
+        run: |
+          mkdir -p .wrangler
+          set -o pipefail
+          npm run smoke:ci 2>&1 | tee .wrangler/smoke-http.log
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: http-smoke-worker-log
+          path: .wrangler/smoke-http.log
+          include-hidden-files: true

@@ -4,9 +4,9 @@ Website analytics built with Cloudflare Workers, Durable Objects and React. It t
 
 ![Dashboard with sample traffic](docs/dashboard.png)
 
-Each site has a Durable Object that stores recent events in SQLite and writes Parquet archives to R2. The dashboard queries SQLite directly; D1 stores site settings, users and daily totals. An optional DuckDB Worker can query the archives.
+Each site has a Durable Object that stores recent events in SQLite. The dashboard queries SQLite directly; D1 stores site settings, users and daily totals. Optional R2 archives and a DuckDB Worker support historical queries. The SQLite deployment profile runs without R2.
 
-The ingestion path handles tracker retries: an event ID and its event are saved in the same transaction. Failed writes return 503 so the tracker can retry. Archive failures leave events queued locally.
+The tracker retries network errors and temporary HTTP failures up to three times with the same event ID. Each attempt has a five-second timeout. The event and its duplicate receipt are saved in the same transaction. Permanent request errors are not retried.
 
 ## Run locally
 

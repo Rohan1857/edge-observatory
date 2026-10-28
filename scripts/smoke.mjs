@@ -22,6 +22,6 @@ const queried = await fetch(`${base}/api/sites/${site.id}/query`, { method: "POS
   body: JSON.stringify({ from: day, to: day, metrics: ["pageviews"], filters: [["page", "is", new URL(event.u).pathname]] }) });
 assert.equal(queried.status, 200, await queried.clone().text());
 const data = await queried.json();
-assert.equal(Number(data.rows[0]?.pageviews), 1, "DuckDB observes one persisted logical pageview");
+assert.equal(Number(data.rows[0]?.pageviews), 1, "SQLite observes one persisted logical pageview");
 assert.equal(data.meta.engine, "sqlite", "the default profile uses native SQLite");
 console.log(JSON.stringify({ status: "pass", checks: ["local authentication", "dashboard", "tracker", "20 duplicate deliveries", "invalid ID", "body bound", "native SQLite query = 1 pageview"], synthetic: true }, null, 2));

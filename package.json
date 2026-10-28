@@ -21,6 +21,7 @@
     "seed:local": "wrangler d1 execute qwa --local -c wrangler.local.jsonc --persist-to .wrangler/local --file scripts/local-seed.sql",
     "typecheck:integration": "tsc -p tsconfig.integration.json",
     "smoke": "node scripts/smoke.mjs",
+    "smoke:ci": "node scripts/smoke-ci.mjs",
     "build:worker": "wrangler deploy --dry-run -c wrangler.free.example.jsonc --outdir .wrangler/build-free"
   },
   "engines": {
