@@ -1,4 +1,16 @@
-# Technical design
+# Architecture
+
+The default configuration runs the API and dashboard on one Worker. Each site has a SQLite Durable Object; D1 stores shared metadata and daily totals, and R2 stores event archives.
+
+```mermaid
+flowchart LR
+  T[Browser tracker] --> W[Worker API]
+  W --> D[Site Durable Object]
+  D --> S[(SQLite)]
+  D --> R[(R2 Parquet archives)]
+  W --> M[(D1 metadata and totals)]
+  U[React dashboard] --> W
+```
 
 ## Transactional ingestion
 
@@ -16,4 +28,4 @@ SQLite aggregates Web Vitals samples; the Durable Object interpolates p75. Perce
 
 SQLite owns recent detail, sessions and receipts. D1 holds metadata and completed daily totals. R2 stores Parquet archives. Detailed retention is 30 days; free-profile drilldowns do not query older archives. Partial coverage is explicit. Rollups start at fully retained local days and refuse partial results rather than persisting fabricated historical zeros.
 
-Production identity uses validated Cloudflare Access JWTs. Deployment examples omit local bypass flags. A 16 KiB body bound and 1000 accepted events/site/day constrain some resource use, but do not cap every request, query scan or account-wide charge. Per-site serialization favors explicit consistency over unlimited hot-site throughput. No production-load, uptime or zero-billing guarantee is claimed.
+Production identity uses validated Cloudflare Access JWTs. The deployment example omits local bypass flags. Requests are limited to 16 KiB and the default cap is 1,000 accepted events per site per day. Queries and rejected requests still use resources, so this is not an account-wide spending limit. A busy site's ingestion and queries share one Durable Object.

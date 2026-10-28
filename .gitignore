@@ -13,6 +13,7 @@ apps/worker/public/
 
 # Your deployment's Worker config (copy apps/worker/wrangler.example.jsonc); demo config is generated
 apps/worker/wrangler.jsonc
+wrangler.jsonc
 apps/worker/.demo.wrangler.jsonc
 .smoke.wrangler.jsonc
 .DS_Store

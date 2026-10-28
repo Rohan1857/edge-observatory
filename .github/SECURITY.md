@@ -1,6 +1,6 @@
 # Security
 
-Please report vulnerabilities privately through GitHub's **Report a vulnerability** button (Security tab) rather than in a public issue. You'll get a reply within a few days.
+Use GitHub's private vulnerability reporting if it is enabled for this repository. Avoid including credentials or visitor data in public issues.
 
 ## Design notes
 
@@ -10,6 +10,6 @@ Please report vulnerabilities privately through GitHub's **Report a vulnerabilit
 - **Local-only switches:**
   - `DEV_USER_EMAIL` (skip Access) and `DEMO` (seed synthetic data) only take effect on `localhost`.
   - Never set either in a deployed Worker.
-- **No personal data at rest:**
+- **Visitor identity:**
   - visitors are a salted hash that changes daily, and old salts are deleted
   - IP addresses and user agents are used during ingestion and then discarded
