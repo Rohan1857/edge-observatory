@@ -132,7 +132,7 @@ export function Header(p: Props) {
       <nav className="nav">
         <div className="brand">
           <span className="sq" aria-hidden />
-          <a className="name" href="/" onClick={p.onHome}>Quick Web Analytics</a>
+          <a className="name" href="/" onClick={p.onHome}>Edge Observatory</a>
           {p.crumb && (
             <>
               <span className="muted" style={{ fontSize: 14 }}>/</span>

@@ -46,7 +46,7 @@ function Footer() {
   const built = new Date(b.builtAt).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   return (
     <footer className="appfoot">
-      Quick Web Analytics {b.version}
+      Edge Observatory {b.version}
       {b.commit && <> · <span title={b.modified ? "Built from this commit plus uncommitted changes" : "The commit this was built from"}>{b.commit}{b.modified ? " (modified)" : ""}</span></>}
       {" "}· built <time dateTime={b.builtAt}>{built}</time>
     </footer>
@@ -117,6 +117,9 @@ function App() {
         sections={page === "site" && site && !url.pathname.includes("/unusual/") ? SECTIONS : undefined}
       />
       <main>
+        {data.reporting?.mode === "sqlite" && <p role="status" style={{ margin: "0 0 20px", fontSize: "13px", color: "var(--muted)" }}>
+          Free profile: detailed reports cover {data.reporting.detailRetentionDays} days. Older raw events are archived in R2; daily totals are retained separately.
+        </p>}
         <Suspense fallback={loading}>
         {page === "account" ? (
           <Account me={data} />

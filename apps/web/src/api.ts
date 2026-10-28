@@ -3,6 +3,7 @@ import type { Dimension, Filter, GroupBy, Metric, QueryResult } from "@qwa/share
 import { addDays, todayIn } from "./dates";
 
 export interface Me {
+  reporting?: { mode: "sqlite" | "duckdb"; detailRetentionDays: number };
   user: { id: number; email: string; name: string | null; role: "admin" | "viewer" };
   /** `first_day`: the first local day with traffic (or the day the site was added), where "All" starts. */
   sites: { id: number; domain: string; timezone: string; first_day: string }[];
