@@ -41,6 +41,10 @@
   }
 
   function send(payload, callback) {
+    // Stable for this delivery (including any caller/network retry), unique for each new event.
+    var bytes = new Uint8Array(16);
+    w.crypto.getRandomValues(bytes);
+    payload.id = Array.prototype.map.call(bytes, function (b) { return b.toString(16).padStart(2, "0"); }).join("");
     var body = JSON.stringify(payload);
     // text/plain keeps this a "simple" request: no CORS preflight.
     if (w.fetch) {

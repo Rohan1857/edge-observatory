@@ -41,6 +41,14 @@ function hide(win: any) {
 }
 
 describe("QWA tracker", () => {
+  it("assigns a distinct receipt ID to every emitted event", () => {
+    const p = page();
+    p.win.qwa("download");
+    const ids = p.sent.map((s) => s.body.id);
+    expect(ids).toHaveLength(2);
+    expect(ids.every((id) => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id))).toBe(true);
+    expect(new Set(ids).size).toBe(2);
+  });
   it("sends a pageview to <script origin>/e with the site", () => {
     const p = page();
     expect(p.sent).toHaveLength(1);
