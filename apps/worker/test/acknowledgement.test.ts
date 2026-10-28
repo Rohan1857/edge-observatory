@@ -21,6 +21,7 @@ describe("durable acknowledgement", () => {
     const response = await handleQwaEvent(request(JSON.stringify(event)), unavailable, ctx);
     expect(response.status).toBe(503);
     expect(response.headers.get("retry-after")).toBe("1");
+    expect(response.headers.get("access-control-expose-headers")?.toLowerCase()).toContain("retry-after");
   });
   it("rejects oversized bodies before parsing or storage", async () => {
     const response = await handleQwaEvent(request(JSON.stringify({ ...event, p: { large: "x".repeat(17_000) } })), {} as Env, ctx);

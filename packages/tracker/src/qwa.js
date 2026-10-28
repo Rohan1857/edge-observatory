@@ -41,22 +41,53 @@
   }
 
   function send(payload, callback) {
-    // Stable for this delivery (including any caller/network retry), unique for each new event.
+    // Serialize once: every attempt must carry the same receipt ID and payload.
     var bytes = new Uint8Array(16);
     w.crypto.getRandomValues(bytes);
     payload.id = Array.prototype.map.call(bytes, function (b) { return b.toString(16).padStart(2, "0"); }).join("");
     var body = JSON.stringify(payload);
-    // text/plain keeps this a "simple" request: no CORS preflight.
-    if (w.fetch) {
-      w.fetch(api, { method: "POST", headers: { "Content-Type": "text/plain" }, body: body, keepalive: true })
-        .then(function () { callback && callback(); }, function () { callback && callback(); });
-    } else {
-      var x = new XMLHttpRequest();
-      x.open("POST", api, true);
-      x.setRequestHeader("Content-Type", "text/plain");
-      x.onreadystatechange = function () { if (x.readyState === 4 && callback) callback(); };
-      x.send(body);
+    var attempts = 0;
+    function attempt() {
+      attempts++;
+      var settled = false;
+      var controller = w.AbortController ? new w.AbortController() : null;
+      var x = null;
+      var timer = setTimeout(function () {
+        complete(0);
+        if (controller) controller.abort();
+        if (x) x.abort();
+      }, 5000);
+      function complete(status, retryAfter) {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (attempts < 4 && (status === 0 || status === 408 || status === 429 || status >= 500 && status < 600)) {
+          var delay = 500 * Math.pow(2, attempts - 1);
+          if (retryAfter) {
+            var seconds = Number(retryAfter);
+            var requested = isFinite(seconds) ? seconds * 1000 : Date.parse(retryAfter) - Date.now();
+            if (isFinite(requested)) delay = Math.max(delay, Math.min(10000, requested));
+          }
+          setTimeout(attempt, delay);
+        } else if (callback) callback();
+      }
+      // text/plain avoids a CORS preflight on tracker requests.
+      try {
+        if (w.fetch) {
+          w.fetch(api, { method: "POST", headers: { "Content-Type": "text/plain" }, body: body, keepalive: true,
+            signal: controller ? controller.signal : undefined })
+            .then(function (response) { complete(response.status, response.headers.get("retry-after")); }, function () { complete(0); });
+        } else {
+          x = new XMLHttpRequest();
+          x.open("POST", api, true);
+          x.setRequestHeader("Content-Type", "text/plain");
+          x.onreadystatechange = function () { if (x.readyState === 4) complete(x.status, x.getResponseHeader("retry-after")); };
+          x.onerror = x.ontimeout = x.onabort = function () { complete(0); };
+          x.send(body);
+        }
+      } catch (e) { complete(0); }
     }
+    attempt();
   }
 
   function pageUrl() {

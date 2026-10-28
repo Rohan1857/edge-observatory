@@ -2,9 +2,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { JSDOM } from "jsdom";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const SOURCE = readFileSync(join(process.cwd(), "src/qwa.js"), "utf8");
+const windows: JSDOM[] = [];
+afterEach(() => {
+  for (const dom of windows.splice(0)) dom.window.close();
+  vi.useRealTimers();
+});
 
 interface Page {
   win: any;
@@ -15,6 +20,7 @@ interface Page {
 
 function page(href = "https://example.com/start", attrs: Record<string, string> = {}, before?: (win: any) => void): Page {
   const dom = new JSDOM("<!doctype html><html><head></head><body></body></html>", { url: href, runScripts: "outside-only", pretendToBeVisual: true });
+  windows.push(dom);
   const win = dom.window as any;
   const sent: Page["sent"] = [];
   const clock = { now: Date.parse("2026-10-08T12:00:00Z") };
@@ -22,7 +28,7 @@ function page(href = "https://example.com/start", attrs: Record<string, string> 
   win.document.hasFocus = () => true;
   win.fetch = async (url: string, init: any) => {
     sent.push({ url, body: JSON.parse(init.body) });
-    return { ok: true };
+    return { ok: true, status: 202, headers: { get: () => null } };
   };
   const el = win.document.createElement("script");
   el.src = "https://analytics.test/t.js";
@@ -41,6 +47,121 @@ function hide(win: any) {
 }
 
 describe("QWA tracker", () => {
+  function retryPage(statuses: (number | Error | "timeout")[]) {
+    vi.useFakeTimers();
+    return page(undefined, { "data-manual": "" }, (win) => {
+      win.setTimeout = setTimeout;
+      win.clearTimeout = clearTimeout;
+      const record = win.fetch;
+      let attempt = 0;
+      win.fetch = async (url: string, init: any) => {
+        await record(url, init);
+        const outcome = statuses[Math.min(attempt++, statuses.length - 1)];
+        if (outcome === "timeout") return new Promise(() => {});
+        if (outcome instanceof Error) throw outcome;
+        return { ok: outcome >= 200 && outcome < 300, status: outcome, headers: { get: () => null } };
+      };
+    });
+  }
+
+  it("retries transient HTTP failures with the identical serialized event and calls back once", async () => {
+    const p = retryPage([503, 503, 202]);
+    const callback = vi.fn();
+    p.win.qwa("Signup", { props: { plan: "pro" }, callback });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(p.sent).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(p.sent).toHaveLength(2);
+    expect(callback).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(p.sent).toHaveLength(3);
+    expect(p.sent.every((request) => JSON.stringify(request.body) === JSON.stringify(p.sent[0].body))).toBe(true);
+    expect(callback).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.sent).toHaveLength(3);
+  });
+
+  it("recovers from a network failure without creating another event ID", async () => {
+    const p = retryPage([new Error("offline"), 202]);
+    p.win.qwa("Signup");
+    await vi.advanceTimersByTimeAsync(500);
+    expect(p.sent).toHaveLength(2);
+    expect(p.sent[1].body).toEqual(p.sent[0].body);
+  });
+
+  it.each([408, 429, 500, 503])("stops after four attempts for HTTP %s", async (status) => {
+    const p = retryPage([status]);
+    const callback = vi.fn();
+    p.win.qwa("Signup", { callback });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.sent).toHaveLength(4);
+    expect(new Set(p.sent.map((request) => request.body.id)).size).toBe(1);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([202, 400, 401, 403, 413])("does not retry HTTP %s", async (status) => {
+    const p = retryPage([status]);
+    const callback = vi.fn();
+    p.win.qwa("Signup", { callback });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.sent).toHaveLength(1);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it("times out hung fetches and finishes after the retry budget", async () => {
+    const p = retryPage(["timeout"]);
+    const callback = vi.fn();
+    p.win.qwa("Signup", { callback });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.sent).toHaveLength(4);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it("bounds server Retry-After delays to ten seconds", async () => {
+    const p = retryPage([503]);
+    const send = p.win.fetch;
+    p.win.fetch = async (...args: any[]) => ({ ...await send(...args), headers: { get: () => "3600" } });
+    p.win.qwa("Signup");
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(p.sent).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(p.sent).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(p.sent).toHaveLength(4);
+  });
+
+  it("retries XHR failures with the same body when fetch is unavailable", async () => {
+    vi.useFakeTimers();
+    const bodies: string[] = [];
+    const p = page(undefined, { "data-manual": "" }, (win) => {
+      win.setTimeout = setTimeout;
+      win.clearTimeout = clearTimeout;
+      win.fetch = undefined;
+      win.XMLHttpRequest = class {
+        readyState = 0;
+        status = 0;
+        onreadystatechange?: () => void;
+        onload?: () => void;
+        open() {}
+        setRequestHeader() {}
+        getResponseHeader() { return null; }
+        send(body: string) {
+          bodies.push(body);
+          this.status = bodies.length === 1 ? 503 : 202;
+          this.readyState = 4;
+          this.onreadystatechange?.();
+          this.onload?.();
+        }
+      };
+    });
+    const callback = vi.fn();
+    p.win.qwa("Signup", { callback });
+    await vi.advanceTimersByTimeAsync(500);
+    expect(bodies).toHaveLength(2);
+    expect(bodies[1]).toBe(bodies[0]);
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it("assigns a distinct receipt ID to every emitted event", () => {
     const p = page();
     p.win.qwa("download");
