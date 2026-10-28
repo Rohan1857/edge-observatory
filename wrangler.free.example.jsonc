@@ -1,0 +1,18 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "edge-observatory-rohan",
+  "main": "apps/worker/src/index.ts",
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "observability": { "enabled": true, "logs": { "invocation_logs": false } },
+  "assets": { "directory": "apps/worker/public", "binding": "ASSETS", "not_found_handling": "single-page-application", "run_worker_first": true },
+  "d1_databases": [{ "binding": "DB", "database_name": "edge-observatory", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "apps/worker/migrations" }],
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "edge-observatory-data" }],
+  "durable_objects": { "bindings": [{ "name": "SITE", "class_name": "SiteDO" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SiteDO"] }],
+  "triggers": { "crons": ["5 0 * * *", "30 3 * * *"] },
+  "vars": { "QUERY_MODE": "sqlite", "DEFAULT_DAILY_CAP": "1000", "INGEST_HOSTS": "", "COMPAT_ENDPOINT": "", "APP_HOST": "" }
+  // Supply ACCESS_TEAM_DOMAIN, ACCESS_AUD and BOOTSTRAP_ADMINS as secrets.
+  // No local bypass or synthetic/demo flags are present in the deployment profile.
+}
