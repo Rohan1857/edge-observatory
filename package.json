@@ -1,9 +1,9 @@
 {
-  "name": "quick-web-analytics",
+  "name": "edge-observatory",
   "version": "0.2.0",
   "private": true,
   "license": "MIT",
-  "description": "Lightweight, privacy-friendly web analytics on Cloudflare",
+  "description": "Cloudflare-native analytics with transactional event receipts and native SQLite reporting",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -13,9 +13,33 @@
     "test": "npm test -w apps/worker -w apps/query -w apps/web -w packages/tracker",
     "typecheck": "npm run typecheck -w apps/worker -w apps/query -w apps/web",
     "deploy": "npm run build && npm run deploy -w apps/query && npm run deploy -w apps/worker",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "test:runtime": "vitest run --config vitest.runtime.config.mts",
+    "verify": "npm run typecheck && npm run typecheck:integration && npm test && npm run test:runtime && npm run build && npm run build:worker",
+    "dev": "wrangler dev -c wrangler.local.jsonc --port 8787 --persist-to .wrangler/local",
+    "db:local": "wrangler d1 migrations apply qwa --local -c wrangler.local.jsonc --persist-to .wrangler/local",
+    "seed:local": "wrangler d1 execute qwa --local -c wrangler.local.jsonc --persist-to .wrangler/local --file scripts/local-seed.sql",
+    "typecheck:integration": "tsc -p tsconfig.integration.json",
+    "smoke": "node scripts/smoke.mjs",
+    "build:worker": "wrangler deploy --dry-run -c wrangler.free.example.jsonc --outdir .wrangler/build-free"
   },
   "engines": {
     "node": ">=22"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.9",
+    "@cloudflare/workers-types": "^5.20261028.1",
+    "@types/node": "^22.20.5",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.154.0"
+  },
+  "overrides": {
+    "undici": "^8.12.3",
+    "vitest": {
+      "vite": "^7.3.7"
+    },
+    "@ducklings/workers": {
+      "vite": "^7.3.7"
+    }
   }
 }

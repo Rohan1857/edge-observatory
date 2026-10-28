@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "es2023", "module": "esnext", "moduleResolution": "bundler", "lib": ["es2023"],
+    "types": ["node", "@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"],
+    "strict": true, "skipLibCheck": true, "noEmit": true, "resolveJsonModule": true
+  },
+  "include": ["apps/worker/integration", "apps/worker/test/acknowledgement.test.ts", "apps/query/src/wasm.d.ts", "vitest.runtime.config.mts"]
+}
