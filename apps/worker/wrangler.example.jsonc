@@ -1,0 +1,49 @@
+// Copy this file to wrangler.jsonc and fill in the values marked "CHANGE". wrangler.jsonc is gitignored,
+// so your hostnames and resource IDs stay out of the repository. See docs/DEPLOY.md.
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "qwa",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-20",
+  "compatibility_flags": ["nodejs_compat"],
+  // Tracking requests are the bulk of traffic: skip the automatic per-request log line (Workers Logs are billed per
+  // line at scale) but keep every console.error/warn, so failures and cap hits are still all recorded.
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false, "head_sampling_rate": 1 } },
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  // CHANGE: the id printed by `npx wrangler d1 create qwa`.
+  "d1_databases": [{ "binding": "DB", "database_name": "qwa", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }],
+  "r2_buckets": [{ "binding": "DATA", "bucket_name": "qwa-data" }],
+  "durable_objects": { "bindings": [{ "name": "SITE", "class_name": "SiteDO" }, { "name": "SCHEDULER", "class_name": "Scheduler" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["SiteDO"] }, { "tag": "v2", "new_sqlite_classes": ["Scheduler"] }],
+  // Optional: anomaly alert emails through Cloudflare Email Sending (also set ALERT_FROM below). See docs/DEPLOY.md.
+  // "send_email": [{ "name": "EMAIL" }],
+  "services": [{ "binding": "QUERY", "service": "qwa-query", "entrypoint": "QueryService" }],
+  // Rate limit for the MCP server (/mcp): 60 requests a minute per token. namespace_id is any number unique in the account.
+  "ratelimits": [{ "name": "MCP_LIMITER", "namespace_id": "1001", "simple": { "limit": 60, "period": 60 } }],
+  // CHANGE: the hostname for the dashboard, tracker and API. It must be on a zone in your Cloudflare account.
+  "routes": [{ "pattern": "analytics.example.com", "custom_domain": true }],
+  "workers_dev": false,
+  "triggers": { "crons": ["5 0 * * *", "30 3 * * *"] },
+  "vars": {
+    // Plausible-compatible ingestion (optional, for migrating existing Plausible snippets):
+    // extra hostnames that only serve /js/* and /api/event, comma-separated. Leave empty if you don't need it.
+    "INGEST_HOSTS": "",
+    // CHANGE: public URL of the compat event endpoint (used inside the pa-*.js scripts).
+    "COMPAT_ENDPOINT": "https://analytics.example.com/api/event",
+    // CHANGE: the dashboard hostname, used for links in alert emails and for redirects from old hostnames.
+    "APP_HOST": "analytics.example.com"
+    // "ALERT_FROM": "Quick Web Analytics <alerts@example.com>",   // sender for alert emails (onboarded domain)
+    // "ALERT_REPLY_TO": "you@example.com",                        // optional: where replies to alerts go
+    // "LEGACY_APP_HOSTS": "old-analytics.example.com",            // old hostnames: keep the tracker, redirect the rest
+    // "DEFAULT_DAILY_CAP": "3000000",                             // events per site per day before recording pauses (cost brake)
+    // "INGEST_PAUSED": "1",                                       // emergency stop: accept and discard all tracking events
+    // "ORIGIN_MODE": "mirror"   // see docs/MIGRATING.md: keep a self-hosted Plausible fed while you switch
+  }
+  // Secrets (set with `npx wrangler secret put NAME`): ACCESS_TEAM_DOMAIN, ACCESS_AUD, BOOTSTRAP_ADMINS,
+  // and optionally GOOGLE_SERVICE_ACCOUNT and GOOGLE_API_KEY for Search Console and speed data (docs/DEPLOY.md).
+}
