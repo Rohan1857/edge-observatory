@@ -8,6 +8,10 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const require = createRequire(import.meta.url);
+const wranglerCli = require.resolve("wrangler/bin/wrangler.js");
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const worker = `${root}apps/worker`;
@@ -21,7 +25,8 @@ if (args.includes("--fresh")) rmSync(`${worker}/${persist}`, { recursive: true, 
 
 if (!existsSync(`${worker}/public/index.html`)) {
   log("building the dashboard and tracker…");
-  if (spawnSync("npm", ["run", "build"], { cwd: root, stdio: "inherit" }).status !== 0) process.exit(1);
+  if (!process.env.npm_execpath) throw new Error("Run npm run build first, or start with npm run demo.");
+  if (spawnSync(process.execPath, [process.env.npm_execpath, "run", "build"], { cwd: root, stdio: "inherit" }).status !== 0) process.exit(1);
 }
 
 // Demo config: the example config without routes or crons, plus the demo flags.
@@ -34,12 +39,12 @@ delete config.triggers;
 config.vars = { ...config.vars, DEMO: "1", DEV_USER_EMAIL: "demo@example.com", BOOTSTRAP_ADMINS: "demo@example.com", COMPAT_ENDPOINT: `${base}/api/event` };
 writeFileSync(`${worker}/.demo.wrangler.jsonc`, JSON.stringify(config, null, 2));
 
-const wrangler = (a, opts = {}) => spawnSync("npx", ["wrangler", ...a], { cwd: worker, stdio: "inherit", ...opts });
+const wrangler = (a, opts = {}) => spawnSync(process.execPath, [wranglerCli, ...a], { cwd: worker, stdio: "inherit", ...opts });
 log("applying database migrations…");
 if (wrangler(["d1", "migrations", "apply", "qwa", "--local", "-c", ".demo.wrangler.jsonc", "--persist-to", persist]).status !== 0) process.exit(1);
 
 log(`starting the Workers on ${base}…`);
-const dev = spawn("npx", ["wrangler", "dev", "-c", ".demo.wrangler.jsonc", "-c", "../query/wrangler.jsonc", "--port", String(port), "--persist-to", persist], {
+const dev = spawn(process.execPath, [wranglerCli, "dev", "-c", ".demo.wrangler.jsonc", "-c", "../query/wrangler.jsonc", "--port", String(port), "--persist-to", persist], {
   cwd: worker,
   stdio: ["ignore", "pipe", "pipe"],
 });
