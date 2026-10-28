@@ -1,7 +1,5 @@
 # Third-party notices
 
-Edge Observatory incorporates [Quick Web Analytics](https://github.com/Zesty0wl/quick-web-analytics), copyright (c) 2026 Neil Johnson, under the MIT licence. The copyright and licence text are preserved in [LICENSE](LICENSE).
-
 | Component | Licence | Used for |
 |---|---|---|
 | Plausible tracker scripts (compiled), © Plausible Insights OÜ | MIT | `packages/tracker-compat/` (full text in `LICENSE.md` there). Served only for Plausible-compatible ingestion during migration. |
@@ -15,5 +13,3 @@ Edge Observatory incorporates [Quick Web Analytics](https://github.com/Zesty0wl/
 | d3-geo, topojson-client | ISC | World map projection |
 | world-atlas (Natural Earth 1:110m, public domain) | ISC | World map shapes |
 | Archivo (via @fontsource/archivo) | SIL Open Font License 1.1 | Dashboard typeface |
-
-Quick Web Analytics includes no code from Plausible's server or dashboard (AGPL-3.0).

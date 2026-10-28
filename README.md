@@ -62,4 +62,4 @@ Runs type checks, unit tests, Durable Object integration tests, the dashboard bu
 
 ## Licence
 
-[MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for source and dependency credits.
+[MIT](LICENSE).
