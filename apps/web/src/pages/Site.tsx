@@ -9,6 +9,7 @@ import { LineChart, type ChartMark } from "../components/LineChart";
 import { SiteSwitcher } from "../components/SiteSwitcher";
 import { WorldMap } from "../components/WorldMap";
 import { Section, Seg } from "../components/Section";
+import { CoverageNotice } from "../components/CoverageNotice";
 // The Google sections sit well down the page: their code loads separately.
 const SearchSection = lazy(() => import("./Google").then((m) => ({ default: m.SearchSection })));
 const SpeedSection = lazy(() => import("./Google").then((m) => ({ default: m.SpeedSection })));
@@ -285,6 +286,7 @@ function Detail({ admin, sites, site, state, url, navigate, dates, compare, peri
             {admin && rt.data && "qwaLastAt" in rt.data && <TrackerTag rt={rt.data} />}
           </div>
           <div className="sub">{site.domain} · {periodText} compared with {cmpText}</div>
+          <CoverageNotice current={totals.isPlaceholderData ? undefined : totals.data?.meta} comparison={cmpTotals.isPlaceholderData ? undefined : cmpTotals.data?.meta} />
         </div>
         {admin && (
           <a className="btn btn-secondary bell" href={settings} onClick={linkHandler(navigate, settings)} title={`Change ${site.domain}'s timezone, allowed hostnames, blocked IPs and daily limit`}>

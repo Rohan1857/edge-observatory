@@ -118,7 +118,7 @@ function App() {
       />
       <main>
         {data.reporting?.mode === "sqlite" && <p role="status" style={{ margin: "0 0 20px", fontSize: "13px", color: "var(--muted)" }}>
-          Free profile: detailed reports cover {data.reporting.detailRetentionDays} days. Older raw events are archived in R2; daily totals are retained separately.
+          Detailed reports cover the last {data.reporting.detailRetentionDays} days. Earlier event detail is not queried in this view; daily totals are stored separately.
         </p>}
         <Suspense fallback={loading}>
         {page === "account" ? (

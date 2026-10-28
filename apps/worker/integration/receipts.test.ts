@@ -25,7 +25,7 @@ describe("durable analytics receipts", () => {
     await site().ingest(1, event());
     await evictDurableObject(site());
     await runInDurableObject(site(), async (instance, state) => {
-      const bucket = (instance as unknown as { env: Env }).env.DATA;
+      const bucket = (instance as unknown as { env: Env }).env.DATA!;
       const original = bucket.put;
       let release!: () => void, entered!: () => void;
       const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -111,7 +111,7 @@ describe("durable analytics receipts", () => {
   it("keeps dirty data after R2 failure and successfully retries the flush", async () => {
     await site().ingest(1, event());
     await runInDurableObject(site(), async (instance, state) => {
-      const bucket = (instance as unknown as { env: Env }).env.DATA;
+      const bucket = (instance as unknown as { env: Env }).env.DATA!;
       const original = bucket.put;
       bucket.put = async () => { throw new Error("injected R2 outage"); };
       try { await expect(instance.flush()).rejects.toThrow("injected R2 outage"); }
@@ -149,7 +149,7 @@ describe("durable analytics receipts", () => {
     await site().ingest(1, ev);
     await site().ingest(1, ev);
     await site().flush();
-    const obj = await bindings.DATA.get(dayKey(1, "pageviews", new Date(ev.ts * 1000).toISOString().slice(0, 10)));
+    const obj = await bindings.DATA!.get(dayKey(1, "pageviews", new Date(ev.ts * 1000).toISOString().slice(0, 10)));
     const buffer = await obj!.arrayBuffer();
     const rows = await parquetReadObjects({ file: { byteLength: buffer.byteLength, slice: (s, e) => buffer.slice(s, e) } });
     expect(rows).toHaveLength(1);

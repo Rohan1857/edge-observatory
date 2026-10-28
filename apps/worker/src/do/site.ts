@@ -278,6 +278,9 @@ export class SiteDO extends DurableObject<Env> {
   async alarm(): Promise<void> {
     await this.flush();
     if (this.persistedDirty.size > 0) await this.ctx.storage.setAlarm(Date.now() + FLUSH_INTERVAL_MS);
+    else if (this.env.ARCHIVE_MODE === "disabled" && this.sql.exec<{ n: number }>("SELECT COUNT(*) n FROM events").one().n > 0) {
+      await this.ctx.storage.setAlarm(Date.now() + 86_400_000);
+    }
   }
 
   /**
@@ -312,6 +315,20 @@ export class SiteDO extends DurableObject<Env> {
   async flush(): Promise<{ days: string[] }> {
     const siteId = Number(this.meta("site_id"));
     if (!siteId) return { days: [] };
+    if (this.env.ARCHIVE_MODE === "disabled") {
+      if (this.env.QUERY_MODE !== "sqlite") throw new Error("disabled archives require SQLite reporting");
+      this.ctx.storage.transactionSync(() => {
+        for (const day of this.persistedDirty) this.recount(day);
+        this.sql.exec("DELETE FROM meta WHERE key LIKE 'dirty:%'");
+      });
+      this.persistedDirty.clear();
+      this.dirtyVersion.clear();
+      this.liveCache.clear();
+      this.purge();
+      return { days: [] };
+    }
+    const bucket = this.env.DATA;
+    if (!bucket) throw new Error("archive bucket is not configured");
     const done: string[] = [];
     for (const day of [...this.persistedDirty].sort()) {
       const version = this.dirtyVersion.get(day) ?? 0;
@@ -320,8 +337,8 @@ export class SiteDO extends DurableObject<Env> {
       for (const table of ["sessions", "pageviews", "engagement", "custom"] as TableName[]) {
         const buf = this.buildDay(table, start, end);
         const k = dayKey(siteId, table, day);
-        if (buf) await this.env.DATA.put(k, buf);
-        else await this.env.DATA.delete(k);
+        if (buf) await bucket.put(k, buf);
+        else await bucket.delete(k);
       }
       this.recount(day);
       // Only clear if nothing was ingested for this day while we were writing.
@@ -380,6 +397,9 @@ export class SiteDO extends DurableObject<Env> {
    * Safe to re-run: an existing month file is rebuilt with any newer day files replacing its rows for those days.
    */
   async compactClosedMonths(siteId: number): Promise<{ month: string; table: TableName; days: number; rows: number }[]> {
+    if (this.env.ARCHIVE_MODE === "disabled") return [];
+    const bucket = this.env.DATA;
+    if (!bucket) throw new Error("archive bucket is not configured");
     const currentMonth = new Date().toISOString().slice(0, 7);
     const pendingDays = new Set(
       this.sql.exec<{ key: string }>("SELECT key FROM meta WHERE key LIKE 'dirty:%'").toArray().map((r) => r.key.slice(6)),
@@ -391,7 +411,7 @@ export class SiteDO extends DurableObject<Env> {
       const days: R2Object[] = [];
       let cursor: string | undefined;
       do {
-        const page = await this.env.DATA.list({ prefix, cursor });
+        const page = await bucket.list({ prefix, cursor });
         days.push(...page.objects);
         cursor = page.truncated ? page.cursor : undefined;
       } while (cursor);
@@ -407,7 +427,7 @@ export class SiteDO extends DurableObject<Env> {
       for (const [month, objs] of byMonth) {
         objs.sort((a, b) => a.key.localeCompare(b.key));
         const mKey = monthKey(siteId, table, month);
-        const existing = await this.env.DATA.head(mKey);
+        const existing = await bucket.head(mKey);
         const sources: MergeSource[] = [];
         if (existing) {
           // Day files present now replace whatever the month file holds for those days.
@@ -416,15 +436,15 @@ export class SiteDO extends DurableObject<Env> {
             const start = Date.parse(`${day}T00:00:00Z`) / 1000;
             return [start, start + 86_400] as [number, number];
           });
-          sources.push({ file: r2Buffer(this.env.DATA, mKey, existing.size), skip });
+          sources.push({ file: r2Buffer(bucket, mKey, existing.size), skip });
         }
-        for (const o of objs) sources.push({ file: r2Buffer(this.env.DATA, o.key, o.size) });
+        for (const o of objs) sources.push({ file: r2Buffer(bucket, o.key, o.size) });
 
         const merged = await mergeTable(table, sources);
-        if (merged) await this.env.DATA.put(mKey, merged.buffer);
-        else if (existing) await this.env.DATA.delete(mKey);
+        if (merged) await bucket.put(mKey, merged.buffer);
+        else if (existing) await bucket.delete(mKey);
         // Only delete the day files once the month file is safely written.
-        await this.env.DATA.delete(objs.map((o) => o.key));
+        await bucket.delete(objs.map((o) => o.key));
         done.push({ month, table, days: objs.length, rows: merged?.rows ?? 0 });
       }
     }

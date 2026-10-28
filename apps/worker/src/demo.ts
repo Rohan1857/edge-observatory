@@ -311,6 +311,7 @@ function byUtcDay(buf: Record<TableName, Cols>): Map<string, Record<TableName, C
 }
 
 async function writeFile(env: Env, key: string, table: TableName, cols: Cols) {
+  if (!env.DATA || env.ARCHIVE_MODE === "disabled") throw new Error("history seeding requires an archive bucket");
   const w = new TableWriter(table);
   w.write(cols);
   if (w.rows) await env.DATA.put(key, w.finish());

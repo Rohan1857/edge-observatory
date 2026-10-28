@@ -6,6 +6,13 @@ import { fillBuckets, fillPeriods } from "../../query/src/shape";
 export const DETAIL_RETENTION_DAYS = 30;
 const PERCENTILES: Metric[] = ["inp", "lcp", "cls", "ttfb", "fcp", "inp_delay", "inp_processing", "inp_presentation"];
 
+/** First complete local day whose midnight is inside the rolling detail window. */
+export function firstRetainedDay(timezone: string, now = Date.now()): string {
+  const cutoff = Math.floor(now / 1000) - DETAIL_RETENTION_DAYS * 86_400;
+  const day = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(cutoff * 1000));
+  return localMidnight(timezone, day) < cutoff ? addDays(day, 1) : day;
+}
+
 /** Native SQLite does the scan and aggregation. Only bounded vital arrays need JS interpolation. */
 export function querySqlite(sql: SqlStorage, timezone: string, input: QuerySpec): QueryResult {
   const started = Date.now();
@@ -41,8 +48,8 @@ export function querySqlite(sql: SqlStorage, timezone: string, input: QuerySpec)
     rows = rows.map((row) => ({ ...row, [key]: dayLabel(Number(row[key])) }));
     rows = fillPeriods(rows, spec, key);
   }
-  const cutoff = Date.now() / 1000 - DETAIL_RETENTION_DAYS * 86_400;
-  const retentionFrom = addDays(new Intl.DateTimeFormat("en-CA", { timeZone: timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(cutoff * 1000)), 1);
+  const cutoff = Math.floor(started / 1000) - DETAIL_RETENTION_DAYS * 86_400;
+  const retentionFrom = firstRetainedDay(timezone, started);
   return { rows, meta: { from: spec.from, to: spec.to, timezone, ms: Date.now() - started, files: 0,
     engine: "sqlite", retentionFrom, partial: from < cutoff } };
 }

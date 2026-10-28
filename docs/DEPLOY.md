@@ -1,6 +1,8 @@
 # Deployment
 
-The root `wrangler.free.example.jsonc` configures one Worker, a SQLite Durable Object per site, D1 and R2. The DuckDB archive Worker is optional. Check Cloudflare resource pricing before creating hosted storage.
+The root `wrangler.free.example.jsonc` configures one Worker, a SQLite Durable Object per site and D1. It has no R2, paid query Worker or observability binding. Before creating resources, confirm that the account is on Workers Free; the example config cannot change or enforce the account's subscription plan.
+
+Workers Free, SQLite Durable Objects and D1 stop serving requests or writes when their free quotas are exhausted. R2 uses metered billing beyond its included allowance, so it is excluded from this profile. See Cloudflare's [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [Durable Objects](https://developers.cloudflare.com/durable-objects/platform/pricing/), [D1](https://developers.cloudflare.com/d1/platform/pricing/) and [R2](https://developers.cloudflare.com/r2/pricing/) pricing documentation.
 
 ## Configuration
 
@@ -14,7 +16,9 @@ cp wrangler.free.example.jsonc wrangler.jsonc
 
 On PowerShell, use `Copy-Item wrangler.free.example.jsonc wrangler.jsonc` for the last command. The destination is gitignored.
 
-Create a D1 database named `edge-observatory` and an R2 bucket named `edge-observatory-data` in the target Cloudflare account. Update the private config with the returned database ID, your Worker name, `APP_HOST` and `COMPAT_ENDPOINT`. The latter should point to `https://<your-host>/api/event`.
+Create one D1 database named `edge-observatory`. Update the private config with the returned database ID, your Worker name, `APP_HOST` and `COMPAT_ENDPOINT`. The latter should point to `https://<your-host>/api/event`. Keep `ARCHIVE_MODE=disabled` and omit `r2_buckets`; do not create an R2 bucket for this profile.
+
+Use one synthetic site initially. The example defaults to 100 accepted events per site per day and keeps detail for 30 days. Site-specific caps can override the default within SQLite's hard limit of 1,000 per day. Cleanup removes expired detail during maintenance. Queries and failed requests remain subject to platform limits.
 
 Configure a hostname for the Worker and protect the dashboard with Cloudflare Access. Keep `/t.js` and `/e` public so browsers can send events. If using Plausible-compatible scripts, also leave `/js/*` and `/api/event` public.
 

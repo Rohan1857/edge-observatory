@@ -4,7 +4,9 @@ import type { QueryBackend } from "./query-backend";
 
 export interface Env {
   DB: D1Database;
-  DATA: R2Bucket;
+  DATA?: R2Bucket;
+  /** Explicit SQLite-only retention: no archive reads or writes. */
+  ARCHIVE_MODE?: "disabled";
   ASSETS: Fetcher;
   SITE: DurableObjectNamespace<SiteDO>;
   /** Runs the hourly jobs on an alarm (optional only so older configs keep deploying; add it from wrangler.example.jsonc). */

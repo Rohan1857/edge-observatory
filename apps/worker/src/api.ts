@@ -847,13 +847,15 @@ demo.use("*", async (c, next) => {
 });
 demo.post("/sites", async (c) => c.json({ sites: await createDemoSites(c.env) }));
 demo.post("/seed/:site", async (c) => {
+  const bucket = c.env.DATA;
+  if (!bucket || c.env.ARCHIVE_MODE === "disabled") return c.json({ error: "history seeding requires an archive bucket" }, 409);
   const site = await siteById(c.env, Number(c.req.param("site")));
   if (!site) return c.json({ error: "no such site" }, 404);
   // Seeding is deterministic, but today's events go through the Durable Object, so only seed once.
-  if (await c.env.DATA.head(seededMarker(site.id))) return c.json({ domain: site.domain, skipped: true });
+  if (await bucket.head(seededMarker(site.id))) return c.json({ domain: site.domain, skipped: true });
   const sessions = await seedHistory(c.env, site);
   const events = await seedToday(c.env, site);
-  await c.env.DATA.put(seededMarker(site.id), new Date().toISOString());
+  await bucket.put(seededMarker(site.id), new Date().toISOString());
   return c.json({ domain: site.domain, sessions, todayEvents: events });
 });
 demo.post("/tick", async (c) => {

@@ -2,6 +2,7 @@ import { queries } from "./query-backend";
 // Daily totals per site (D1 `daily_stats`), computed from the Parquet store via the query worker.
 import type { Env, Site } from "./env";
 import { addDays, todayIn } from "./tz";
+import { firstRetainedDay } from "./sqlite-query";
 
 export interface DayStats {
   day: string;
@@ -25,7 +26,7 @@ export async function rollupSite(env: Env, site: Site, opts: { maxChunks?: numbe
     .first<{ last: string | null; created: string }>();
   let from = row?.last ? addDays(row.last, 1) : row?.created ?? yesterday;
   if (env.QUERY_MODE === "sqlite") {
-    const retainedFrom = addDays(todayIn(site.timezone, Date.now() - 30 * 86_400_000), 1);
+    const retainedFrom = firstRetainedDay(site.timezone);
     if (from < retainedFrom) {
       console.warn("rollup history unavailable before retained detail", site.id, retainedFrom);
       from = retainedFrom;
