@@ -1,142 +1,67 @@
-# Quick Web Analytics
+# Edge Observatory
 
-**Lightweight, privacy-friendly web analytics that runs entirely on your own Cloudflare account.**
+Website analytics on Cloudflare Workers, with transactional event receipts, native SQLite reporting and R2 Parquet archives.
 
-No cookies, no servers to look after, no per-pageview pricing. A 3 KB tracker that also measures Core Web Vitals, a fast dashboard built around day-by-day change, and per-site sharing with the people who need it.
+Tracker retries should not inflate reports, failed writes should not receive successful persistence acknowledgements, and archive outages should not discard pending events. Executable tests cover these guarantees.
 
-![All sites overview](docs/screenshots/overview-light.png)
+![Local dashboard demonstration](docs/dashboard.png)
 
-## Features
+```mermaid
+flowchart LR
+  T[Cookieless tracker] --> W[Worker: bounded validation]
+  W --> D[Per-site Durable Object]
+  D --> S[(SQLite events, sessions and receipts)]
+  S --> Q[Analytical SQL and p75]
+  Q --> UI[React dashboard]
+  D --> R[(R2 Parquet archive)]
+  W --> M[(D1 metadata and daily totals)]
+```
 
-- **Cookieless and private.**
-  - Visitors are counted with a salted hash that rotates daily.
-  - No cookies, IP addresses or user agents are stored, and visitors can't be followed from one day to the next.
-- **Runs on Cloudflare only:** Workers, Durable Objects, R2, D1 and DuckDB-WASM. It costs nothing on top of the Workers Paid plan at small-to-medium volumes.
-- **All your sites at a glance:**
-  - totals with change against the previous period or last year
-  - live visitors across every site
-  - cards, heat tiles or a table, sorted by visitors, growth or decline
-- **A detailed page per site:**
-  - **Metrics and chart:** nine metrics, each with its change, and a chart with the comparison period overlaid. Click the chart to zoom into a day, week or month.
-  - **Breakdowns:** realtime with a live map, sources and channels, pages (entry and exit too), UTM campaigns, custom events, devices and browsers, countries and cities.
-  - **Day-by-day views:** a weekday × hour heatmap, and a day-by-day table with day-over-day and week-over-week change.
-- **Core Web Vitals from real visits:** the tracker measures INP, LCP, CLS, TTFB and FCP on every page view. For slow interactions it records which element was involved and where the time went (input delay, processing, presentation). It works on every site, with no Google account needed, and shows per page, device and browser.
-- **Agent access (MCP):** AI agents can read your analytics through a built-in MCP server. It covers summaries, top pages and sources, trends, realtime, unusual days, Search Console, Core Web Vitals with slow-interaction attribution, and PageSpeed runs on any page.
-  - **Connecting:** Claude Desktop and claude.ai connect with a "Connect" button (OAuth); Claude Code, Cursor and Codex use a personal token.
-  - **Access:** read-only, and can be limited to a few sites.
-- **Google data (optional):** Search Console clicks, impressions, positions and queries on each site's page, plus nightly PageSpeed tests and real-visitor Core Web Vitals from the Chrome UX Report.
-- **Anomaly alerts:** unusual days (spikes, drops, possible outages) are spotted against the same weekday's usual range, hourly for the day so far and nightly for whole days, and marked with an alarm on the chart. Anyone can opt in to an email per site (Cloudflare Email Sending).
-- **Cost brakes:** a daily event limit per site (recording pauses until midnight, admins are emailed), an emergency stop, and guidance for an edge rate limit and billing alerts. Cloudflare has no hard spending cap, so QWA brings its own.
-- **Everything filters:** click any row to filter the whole page by it, then flip a filter between *is* and *is not*.
-- **Share per site:** admins give each person access to specific sites. Sign-in uses Cloudflare Access (email codes, Google, GitHub…), so QWA never stores passwords.
-- **Plausible-compatible:** existing Plausible snippets keep working while you switch over, and history can be imported from a self-hosted Plausible CE instance. See [MIGRATING.md](docs/MIGRATING.md).
-- **Looks how you like:** light and dark, five accent colours, rounded cards or a flat grid. It works on phones.
+## Local development
 
-| | |
-|---|---|
-| ![Site detail](docs/screenshots/site.png) | ![Realtime](docs/screenshots/realtime.png) |
-| ![Sources](docs/screenshots/sources.png) | ![Heatmap](docs/screenshots/heatmap.png) |
-| ![Day by day](docs/screenshots/day-by-day.png) | ![Switch sites, dark mode](docs/screenshots/switcher.png) |
-
-<sub>Screenshots show the built-in demo with synthetic data (`npm run demo`).</sub>
-
-## Try it locally (no account needed)
+Requires Node 22+ and npm. No cloud account or paid plan is needed locally.
 
 ```sh
-git clone https://github.com/Zesty0wl/quick-web-analytics.git
-cd quick-web-analytics
-npm install
-npm run demo
+npm ci
+npm run verify
+npm run db:local
+npm run seed:local
+npm run dev
 ```
 
-Open <http://localhost:8787>. The demo:
-- runs both Workers locally with local storage
-- seeds eight fictional sites with about 13 months of realistic traffic
-- keeps adding live visitors, so the realtime panels move
-- signs you in as an admin
+Open http://localhost:8787. Run `npm run smoke` in another terminal. `portfolio.example` is a synthetic fixture. The development administrator bypass works only on loopback hostnames; never deploy the local config.
 
-`npm run demo -- --fresh` starts again from scratch.
+## Implemented behavior
 
-## Deploy your own
+- Rotating visitor identities without storing raw IP addresses.
+- Validated event IDs, duplicate suppression and transactional session/event/receipt writes.
+- Bounded 16 KiB bodies and retryable 503 responses when persistence fails.
+- Native SQLite traffic, engagement, dimension and timezone reports; interpolated p75 Web Vitals.
+- Thirty days of detailed queries, separate D1 daily totals and Parquet archives.
+- Authenticated APIs, React dashboard, live updates and backpressure-driven query streams.
 
-### With an AI agent (recommended)
+The default free profile uses Durable Object SQLite without a paid DuckDB Worker. An optional archive query engine remains in source for local experimentation.
 
-QWA is set up to be deployed by an AI coding agent such as Claude Code, Codex or Cursor. [AGENTS.md](AGENTS.md) is its runbook: every step, how to check it, and where to stop and ask you.
+## Verification
 
-1. **Give the agent access:** a Cloudflare API token with the permissions listed in [AGENTS.md](AGENTS.md#what-the-person-provides). Export it as `CLOUDFLARE_API_TOKEN` (and your account ID as `CLOUDFLARE_ACCOUNT_ID`) in the shell you start the agent from, so you never paste it into the chat.
-2. **Clone the repository, start your agent in it, and say:**
-   > Deploy Quick Web Analytics to my Cloudflare account by following AGENTS.md. Use the dashboard hostname analytics.example.com and make me (you@example.com) the admin. Track example.com (Europe/London). Add the cost brakes and Google Search data.
-3. **Do the few things only you can:**
-   - confirm your Workers Paid plan
-   - turn on Cloudflare Zero Trust once, if you never have
-   - sign in to the dashboard
-   - for Google data, sign in to Google and grant Search Console access to each site
+`npm run verify` runs application/integration typechecks, workspace tests, Workers-runtime tests, frontend production build and free-profile Worker dry-run. `npm audit` checks dependencies.
 
-The agent tells you when each one is needed.
+The HTTP smoke sends twenty copies of one event and verifies one logical pageview through the running native backend. Tests cover eviction, salt rotation, rollback, R2 failure, concurrent ingest/flush recovery, SQL filters, percentile ranking, midnight-crossing reports and incomplete historical rollups. [Verification report](VERIFICATION_REPORT.md).
 
-### By hand
+## Deployment
 
-Follow **[docs/DEPLOY.md](docs/DEPLOY.md)**. Allow about 20 minutes. In short:
-1. Create a D1 database and an R2 bucket.
-2. Copy `apps/worker/wrangler.example.jsonc` to `wrangler.jsonc` and set your hostname.
-3. Run `npm run deploy`.
-4. Put the dashboard behind Cloudflare Access.
-5. Optionally, connect Google under **Admin → Google**, which walks you through it in the browser.
+**Delivered status: local only, as requested. No live deployment is claimed.**
 
-Then add the snippet to your site. **Admin → Sites → Install** also has a ready-made prompt to paste into your coding agent, which puts it in the right place for your framework:
+`wrangler.free.example.jsonc` defines one Worker, SQLite Durable Objects, D1 and R2, without development bypasses, demo flags or a paid query binding.
 
-```html
-<script defer src="https://analytics.example.com/t.js" data-site="example.com"></script>
-```
+When remote resources are authorized: create D1 `edge-observatory` and R2 `edge-observatory-data`; copy the free example to gitignored `wrangler.jsonc`; set its database ID and actual hostname; apply migrations with `npx wrangler d1 migrations apply edge-observatory --remote -c wrangler.jsonc`; configure Cloudflare Access and `ACCESS_TEAM_DOMAIN`, `ACCESS_AUD`, `BOOTSTRAP_ADMINS` secrets; build and deploy using `npx wrangler deploy -c wrangler.jsonc`. Protect dashboard paths while leaving tracker/ingestion public. The application also validates Access JWTs.
 
-Custom events: `qwa("Signup", { props: { plan: "pro" } })`, or `class="qwa-event-name=Signup"` on any element. Tracker options are listed in the [deployment guide](docs/DEPLOY.md#tracker-options).
+## Limits and tradeoffs
 
-## How it works
+The free profile caps accepted events at 1000/site/day and detailed SQLite history at 30 days. Older raw events are archived; free-profile drilldowns do not query historical Parquet. Daily totals persist separately. Partial coverage is explicit, and unavailable history cannot become authoritative zero rollups.
 
-```
- tracker (/t.js) ──POST /e──▶ Worker "qwa" ──▶ SiteDO (Durable Object per site: sessions, today, realtime)
-                                  │                    │ every 5 min
-                                  │                    ▼
-                                  │              R2: Parquet files per site / table / day → month
-                                  │                    ▲
- dashboard (Access) ──/api/*──▶   ├──▶ Worker "qwa-query" (DuckDB-WASM reads the Parquet it needs)
-                                  └──▶ D1: sites, users, access grants, daily totals
-```
+Receipts last 72 hours, but matching uses current/previous daily visitor identities. Identity changes or later rotations can count a retry again. Physical cleanup occurs on flush. Bots, unknown sites and capped traffic may deliberately be acknowledged without storage.
 
-The details, and the reasons behind them, are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+These limits do not cap every request or guarantee zero billing. R2 has metered overages; this demonstration stays local. No production throughput or uptime is claimed.
 
-| Path | What's there |
-|---|---|
-| `apps/worker` | Main Worker: ingestion, auth, dashboard API, `SiteDO`, scheduled jobs, demo mode |
-| `apps/query` | Query Worker: turns a small query spec into DuckDB SQL over R2 |
-| `apps/web` | Dashboard (React, TanStack Query, hand-rolled SVG charts, d3-geo map) |
-| `packages/tracker` | The tracker served at `/t.js` |
-| `packages/shared` | Storage layout and query spec used by all of the above |
-| `packages/tracker-compat` | Plausible's MIT tracker builds, for Plausible-compatible ingestion |
-| `tools/import-ce` | Import history from a self-hosted Plausible CE instance |
-
-## Develop
-
-```sh
-npm run demo          # the easiest way to work on the dashboard
-npm test              # worker, query and tracker tests
-npm run typecheck
-npm run build         # dashboard + tracker → apps/worker/public
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## Status
-
-QWA is young, but it runs in production for a couple of dozen sites. Planned:
-- API tokens and an MCP server, so agents can query stats
-- public share links
-- email digests
-
-Issues and pull requests are welcome. See [CHANGELOG.md](CHANGELOG.md) for what's changed.
-
-## Licence
-
-MIT, see [LICENSE](LICENSE). Bundled third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-QWA contains no code from Plausible's server or dashboard (AGPL-3.0). Only Plausible's MIT-licensed tracker is bundled, for migration. "Plausible" is a trademark of Plausible Insights OÜ; this project isn't affiliated with or endorsed by it.
+[Technical design](docs/design.md) · [MIT license](LICENSE) · [Third-party notices](THIRD_PARTY_NOTICES.md)
