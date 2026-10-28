@@ -1,3 +1,4 @@
+import { queries } from "./query-backend";
 // Nightly anomaly check and alert emails (Cloudflare Email Sending via the EMAIL binding).
 import { denseSeries, detectAnomalies, detectIntraday, episodes, type Anomaly } from "./anomaly";
 import { renderAlertEmail, renderCapEmail, type AlertDetail, type DayFigures } from "./email";
@@ -93,8 +94,8 @@ export async function alertDetail(
       const movers = async (dim: "source" | "page" | "country") => {
         const spec = { metrics: ["visitors" as const], groupBy: dim, limit: 300 };
         const [day, ...before] = await Promise.all([
-          env.QUERY.query(site.id, site.timezone, { ...spec, from: a.day, to: a.day, ...opts.window }),
-          ...usualDays.map((d) => env.QUERY.query(site.id, site.timezone, { ...spec, from: d, to: d, ...span(d) })),
+          queries(env).query(site.id, site.timezone, { ...spec, from: a.day, to: a.day, ...opts.window }),
+          ...usualDays.map((d) => queries(env).query(site.id, site.timezone, { ...spec, from: d, to: d, ...span(d) })),
         ]);
         const totals = new Map<string, number>();
         for (const res of before) for (const r of res.rows) totals.set(String(r[dim] ?? ""), (totals.get(String(r[dim] ?? "")) ?? 0) + Number(r.visitors ?? 0));
@@ -214,7 +215,7 @@ export async function notifyCapped(env: Env, site: Site, cap: number, day: strin
 async function intradayBaseline(env: Env, site: Site, day: string, opts: { cache?: boolean } = {}): Promise<number[][]> {
   const cached = await env.DB.prepare("SELECT hourly FROM intraday_baselines WHERE site_id = ? AND day = ?").bind(site.id, day).first<{ hourly: string }>();
   if (cached) return JSON.parse(cached.hourly) as number[][];
-  const res = await env.QUERY.query(site.id, site.timezone, { from: addDays(day, -42), to: addDays(day, -1), metrics: ["visits"], groupBy: "hour", limit: 1000 });
+  const res = await queries(env).query(site.id, site.timezone, { from: addDays(day, -42), to: addDays(day, -1), metrics: ["visits"], groupBy: "hour", limit: 1000 });
   const byHour = new Map(res.rows.map((r) => [String(r.hour), Number(r.visits ?? 0)]));
   const days = [6, 5, 4, 3, 2, 1].map((w) => addDays(day, -7 * w));
   // Only weeks that had any traffic count (a site younger than six weeks has fewer).
@@ -332,7 +333,7 @@ export async function explainAnomaly(env: Env, site: Site, a: StoredAnomaly): Pr
   // An earlier day: the whole day's hours from the query worker.
   const [hourly, day] = await Promise.all([
     intradayBaseline(env, site, a.day, { cache: false }),
-    env.QUERY.query(site.id, site.timezone, { from: a.day, to: a.day, metrics: ["visits"], groupBy: "hour" }),
+    queries(env).query(site.id, site.timezone, { from: a.day, to: a.day, metrics: ["visits"], groupBy: "hour" }),
   ]);
   const byHour = new Map(day.rows.map((r) => [Number(String(r.hour).slice(11, 13)), Number(r.visits ?? 0)]));
   return intradayDetail(env, site, a.day, hour, hourly, found, null, Array.from({ length: 24 }, (_, h) => byHour.get(h) ?? 0));

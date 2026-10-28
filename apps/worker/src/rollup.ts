@@ -1,3 +1,4 @@
+import { queries } from "./query-backend";
 // Daily totals per site (D1 `daily_stats`), computed from the Parquet store via the query worker.
 import type { Env, Site } from "./env";
 import { addDays, todayIn } from "./tz";
@@ -23,15 +24,23 @@ export async function rollupSite(env: Env, site: Site, opts: { maxChunks?: numbe
     .bind(site.id)
     .first<{ last: string | null; created: string }>();
   let from = row?.last ? addDays(row.last, 1) : row?.created ?? yesterday;
+  if (env.QUERY_MODE === "sqlite") {
+    const retainedFrom = addDays(todayIn(site.timezone, Date.now() - 30 * 86_400_000), 1);
+    if (from < retainedFrom) {
+      console.warn("rollup history unavailable before retained detail", site.id, retainedFrom);
+      from = retainedFrom;
+    }
+  }
   if (from > yesterday) return { from: null, to: null, days: 0 };
   const start = from;
   let written = 0;
   for (let chunks = 0; from <= yesterday && chunks < (opts.maxChunks ?? 100); chunks++) {
     const to = [addDays(from, CHUNK_DAYS - 1), yesterday].sort()[0];
-    const res = await env.QUERY.query(site.id, site.timezone, {
+    const res = await queries(env).query(site.id, site.timezone, {
       from, to, groupBy: "day",
       metrics: ["visitors", "visits", "pageviews", "events", "bounce_rate", "visit_duration"],
     });
+    if (res.meta.partial) throw new Error("cannot persist incomplete detail as daily totals");
     const stmts = res.rows.map((r) =>
       env.DB.prepare(
         "INSERT INTO daily_stats (site_id, day, visitors, visits, pageviews, events, bounces, duration_sum) VALUES (?,?,?,?,?,?,?,?) " +

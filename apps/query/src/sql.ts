@@ -17,6 +17,7 @@ export interface SqlInput {
   segments: [number, number][]; // tz offset segments for [from, to)
   files: Record<TableName, string[]>; // file URLs per table
   approximate: boolean;
+  dialect?: "duckdb" | "sqlite";
 }
 
 type Family = TableName | "vitals";
@@ -36,10 +37,10 @@ function source(table: TableName, files: string[]): string {
   return table === "engagement" ? `(SELECT * FROM ${read} UNION ALL BY NAME ${empty})` : read;
 }
 
-function cond(col: string, op: Filter[1], value: Filter[2]): string {
+function filterCondition(col: string, op: Filter[1], value: Filter[2], sqlite = false): string {
   const values = Array.isArray(value) ? value : [value];
   if (op === "contains") {
-    const any = values.map((v) => `contains(lower(${col}), ${quote(v.toLowerCase())})`).join(" OR ");
+    const any = values.map((v) => sqlite ? `instr(lower(${col}), ${quote(v.toLowerCase())}) > 0` : `contains(lower(${col}), ${quote(v.toLowerCase())})`).join(" OR ");
     return `(${any})`;
   }
   const list = values.map(quote).join(", ");
@@ -66,6 +67,9 @@ const p75 = (expr: string) => `round(quantile_cont(${expr}, 0.75))`;
 
 export function buildSql(input: SqlInput): { sql: string; key: string | null } {
   const { spec, from, to, segments, files } = input;
+  const sqlite = input.dialect === "sqlite";
+  const cond = (col: string, op: Filter[1], value: Filter[2]) => filterCondition(col, op, value, sqlite);
+  const percentile = (expr: string) => sqlite ? `json_group_array(${expr})` : p75(expr);
   const filters = spec.filters ?? [];
   const groupBy = spec.groupBy ?? null;
   const distinct = (col: string) => (input.approximate ? `approx_count_distinct(${col})` : `COUNT(DISTINCT ${col})`);
@@ -127,6 +131,16 @@ export function buildSql(input: SqlInput): { sql: string; key: string | null } {
   function keyFor(table: Family): { expr: string; join: string } | null {
     if (!groupBy) return null;
     const timeCol = table === "sessions" ? "t.start" : "t.ts";
+    if (sqlite) {
+      const lt = localTimeSql(timeCol, segments);
+      const bucket = (n: number) => `CAST((${lt}) / ${n} AS INTEGER)`;
+      if (groupBy === "day") return { expr: bucket(86400), join: "" };
+      if (groupBy === "hour") return { expr: bucket(3600), join: "" };
+      if (groupBy === "quarter_hour") return { expr: bucket(900), join: "" };
+      if (groupBy === "weekhour") return { expr: `((${bucket(86400)} + 3) % 7) * 24 + (${bucket(3600)} % 24)`, join: "" };
+      if (groupBy === "week") return { expr: `${bucket(86400)} - ((${bucket(86400)} + 3) % 7)`, join: "" };
+      if (groupBy === "month") return { expr: `CAST(strftime('%s', ${lt}, 'unixepoch', 'start of month') AS INTEGER) / 86400`, join: "" };
+    }
     if (groupBy === "day") return { expr: `${localTimeSql(timeCol, segments)} // 86400`, join: "" };
     if (groupBy === "hour") return { expr: `${localTimeSql(timeCol, segments)} // 3600`, join: "" };
     if (groupBy === "quarter_hour") return { expr: `${localTimeSql(timeCol, segments)} // 900`, join: "" };
@@ -158,22 +172,22 @@ export function buildSql(input: SqlInput): { sql: string; key: string | null } {
   const metricSql: Record<Metric, () => void> = {
     visitors: () => add(visitorsTable, `${distinct("t.visitor")} AS visitors`),
     visits: () => add("sessions", "COUNT(*) AS visits"),
-    views_per_visit: () => add("sessions", "round(SUM(t.pageviews) / nullif(COUNT(*), 0), 2) AS views_per_visit"),
+    views_per_visit: () => add("sessions", "round(1.0 * SUM(t.pageviews) / nullif(COUNT(*), 0), 2) AS views_per_visit"),
     bounce_rate: () => add("sessions", "round(100.0 * SUM(t.bounce) / nullif(COUNT(*), 0), 1) AS bounce_rate"),
     visit_duration: () => add("sessions", "round(AVG(t.duration)) AS visit_duration"),
     pageviews: () => add("pageviews", "COUNT(*) AS pageviews"),
     events: () => add("custom", "COUNT(*) AS events"),
     scroll_depth: () => add("engagement", "round(AVG(nullif(t.scroll_depth, 0))) AS scroll_depth"),
     time_on_page: () => add("engagement", `round(SUM(t.engaged_ms) / 1000.0 / nullif(${distinct("t.visitor")}, 0)) AS time_on_page`),
-    inp: () => add("vitals", `${p75("nullif(t.inp, 0)")} AS inp`),
-    lcp: () => add("vitals", `${p75("nullif(t.lcp, 0)")} AS lcp`),
+    inp: () => add("vitals", `${percentile("nullif(t.inp, 0)")} AS inp`),
+    lcp: () => add("vitals", `${percentile("nullif(t.lcp, 0)")} AS lcp`),
     // CLS is stored × 1000, with -1 for "not measured" (0 is a valid, perfect score).
-    cls: () => add("vitals", "round(quantile_cont(CASE WHEN t.cls >= 0 THEN t.cls END, 0.75) / 1000.0, 3) AS cls"),
-    ttfb: () => add("vitals", `${p75("nullif(t.ttfb, 0)")} AS ttfb`),
-    fcp: () => add("vitals", `${p75("nullif(t.fcp, 0)")} AS fcp`),
-    inp_delay: () => add("vitals", `${p75("CASE WHEN t.inp > 0 THEN t.inp_delay END")} AS inp_delay`),
-    inp_processing: () => add("vitals", `${p75("CASE WHEN t.inp > 0 THEN t.inp_processing END")} AS inp_processing`),
-    inp_presentation: () => add("vitals", `${p75("CASE WHEN t.inp > 0 THEN t.inp_presentation END")} AS inp_presentation`),
+    cls: () => add("vitals", sqlite ? "json_group_array(CASE WHEN t.cls >= 0 THEN t.cls END) AS cls" : "round(quantile_cont(CASE WHEN t.cls >= 0 THEN t.cls END, 0.75) / 1000.0, 3) AS cls"),
+    ttfb: () => add("vitals", `${percentile("nullif(t.ttfb, 0)")} AS ttfb`),
+    fcp: () => add("vitals", `${percentile("nullif(t.fcp, 0)")} AS fcp`),
+    inp_delay: () => add("vitals", `${percentile("CASE WHEN t.inp > 0 THEN t.inp_delay END")} AS inp_delay`),
+    inp_processing: () => add("vitals", `${percentile("CASE WHEN t.inp > 0 THEN t.inp_processing END")} AS inp_processing`),
+    inp_presentation: () => add("vitals", `${percentile("CASE WHEN t.inp > 0 THEN t.inp_presentation END")} AS inp_presentation`),
     measured_views: () => add("vitals", "COUNT(*) AS measured_views"),
   };
   for (const m of spec.metrics) metricSql[m]();
@@ -189,8 +203,13 @@ export function buildSql(input: SqlInput): { sql: string; key: string | null } {
   if (used.has("vitals")) used.add("engagement");
 
   const withs: string[] = [];
-  for (const t of used) if (t !== "vitals") withs.push(`src_${t} AS (SELECT * FROM ${source(t, files[t])})`);
-  if (used.has("vitals")) withs.push(`src_vitals AS (${VITALS_SOURCE})`);
+  for (const t of used) if (t !== "vitals") {
+    const local = t === "sessions" ? "sessions" : `(SELECT * FROM events WHERE kind = '${t === "pageviews" ? "pageview" : t === "custom" ? "custom" : "engagement"}')`;
+    withs.push(`src_${t} AS (SELECT * FROM ${sqlite ? local : source(t, files[t])})`);
+  }
+  if (used.has("vitals")) withs.push(`src_vitals AS (${sqlite
+    ? "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY session, pv ORDER BY ts DESC, id DESC) AS latest FROM src_engagement WHERE pv <> 0) WHERE latest = 1"
+    : VITALS_SOURCE})`);
 
   const order: Family[] = [visitorsTable, "sessions", "pageviews", "custom", "engagement", "vitals"].filter(
     (t, i, a) => ctes.has(t as Family) && a.indexOf(t) === i,
@@ -212,12 +231,14 @@ export function buildSql(input: SqlInput): { sql: string; key: string | null } {
     sql = `SELECT ${cols.join(", ")} FROM m_${main}${rest.map((t) => ` CROSS JOIN m_${t}`).join("")}`;
   } else {
     const keyCol = groupBy;
-    const joins = rest.map((t) => ` LEFT JOIN m_${t} USING (k)`).join("");
+    const keys = order.map((t) => `SELECT k FROM m_${t}`).join(" UNION ");
+    const joins = order.map((t) => ` LEFT JOIN m_${t} USING (k)`).join("");
     const isTime = groupBy === "day" || groupBy === "hour" || groupBy === "quarter_hour" || groupBy === "week" || groupBy === "month" || groupBy === "weekhour";
     const sortMetric = spec.metrics[0];
-    const orderBy = isTime ? "k" : `${sortMetric} DESC NULLS LAST, k`;
-    const limit = isTime ? "" : ` LIMIT ${spec.limit ?? 100}`;
-    sql = `SELECT k AS ${keyCol}, ${cols.join(", ")} FROM m_${main}${joins} ORDER BY ${orderBy}${limit}`;
+    const deferredPercentile = sqlite && vital(sortMetric);
+    const orderBy = isTime || deferredPercentile ? "k" : `${sortMetric} DESC NULLS LAST, k`;
+    const limit = isTime || deferredPercentile ? "" : ` LIMIT ${spec.limit ?? 100}`;
+    sql = `SELECT k AS ${keyCol}, ${cols.join(", ")} FROM (${keys}) all_keys${joins} ORDER BY ${orderBy}${limit}`;
   }
   return { sql: `WITH ${withs.join(",\n")}\n${sql}`, key: groupBy };
 }

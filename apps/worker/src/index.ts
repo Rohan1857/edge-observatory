@@ -18,6 +18,7 @@ const app = new Hono<{ Bindings: Env }>();
 // The hourly jobs run on the Scheduler's alarm, which re-arms itself. Make sure it's armed, once per isolate.
 let schedulerChecked = false;
 const ensureScheduler = (env: Env, ctx: { waitUntil(p: Promise<unknown>): void }) => {
+  if (env.QUERY_MODE === "sqlite") return; // Optional historical anomaly jobs need the archive query engine.
   if (schedulerChecked || !env.SCHEDULER) return;
   schedulerChecked = true;
   ctx.waitUntil(env.SCHEDULER.get(env.SCHEDULER.idFromName("global")).ensure().catch((e) => {
@@ -144,6 +145,8 @@ export default {
   async scheduled(event, env, ctx) {
     if (event.cron === "5 0 * * *") ctx.waitUntil(rotateSalts(env.DB, Date.now()));
     ensureScheduler(env, ctx); // the hourly jobs (see do/scheduler.ts)
-    if (event.cron === "30 3 * * *") ctx.waitUntil(compactAll(env).then(() => rollupAll(env)).then(async () => anomalyJob(env, await allSites(env))));
+    if (event.cron === "30 3 * * *") ctx.waitUntil(compactAll(env).then(() => rollupAll(env)).then(async () => {
+      if (env.QUERY_MODE !== "sqlite") await anomalyJob(env, await allSites(env));
+    }));
   },
 } satisfies ExportedHandler<Env>;

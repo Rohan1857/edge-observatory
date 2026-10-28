@@ -2,6 +2,7 @@ export type EventKind = "pageview" | "engagement" | "custom";
 
 /** Raw event after parsing a tracker payload, before enrichment. Source-agnostic. */
 export interface RawEvent {
+  eventId?: string;
   domains: string[];
   name: string;
   url: URL;
@@ -35,6 +36,7 @@ export interface Vitals {
 
 /** Fully enriched event, as handed to the site's Durable Object. */
 export interface SiteEvent {
+  eventId?: string;
   ts: number; // unix seconds
   kind: EventKind;
   name: string;

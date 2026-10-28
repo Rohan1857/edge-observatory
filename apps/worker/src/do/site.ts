@@ -8,10 +8,12 @@ import { emptyColumns, TableWriter } from "../storage/parquet";
 import { mergeTable, r2Buffer, type MergeSource } from "../storage/compact";
 import { randomId, utcDay } from "../ingest/visitor";
 import { forViewer } from "../realtime";
+import { DETAIL_RETENTION_DAYS, querySqlite } from "../sqlite-query";
+import type { QuerySpec } from "@qwa/shared";
 
 const SESSION_TIMEOUT_S = 30 * 60;
 const FLUSH_INTERVAL_MS = 5 * 60 * 1000;
-const LOCAL_RETENTION_S = 3 * 86_400;
+const LOCAL_RETENTION_S = DETAIL_RETENTION_DAYS * 86_400;
 /** How often live day files for queries may be rebuilt (per day), while events keep arriving. */
 const LIVE_REBUILD_MS = 5_000;
 /** Dashboards watching this site get at most one live update per this interval while events arrive. */
@@ -25,7 +27,7 @@ const VITAL_EVENT_COLUMNS: [keyof Vitals, "INTEGER" | "TEXT"][] = [
 const SESSION_COLS = COLUMNS.sessions.map(([c]) => c);
 
 /** What happened to an ingested event. "capped-first" is returned once per day, when the daily cap is first hit. */
-export type IngestResult = "ok" | "dropped" | "capped" | "capped-first";
+export type IngestResult = "ok" | "duplicate" | "dropped" | "capped" | "capped-first";
 
 export type Realtime = ReturnType<SiteDO["snapshot"]>;
 
@@ -70,6 +72,8 @@ export class SiteDO extends DurableObject<Env> {
       CREATE INDEX IF NOT EXISTS events_ts ON events(ts);
       CREATE TABLE IF NOT EXISTS daily_counts (day TEXT NOT NULL, via TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, via));
       CREATE TABLE IF NOT EXISTS counts_carried (day TEXT NOT NULL, via TEXT NOT NULL, n INTEGER NOT NULL, PRIMARY KEY (day, via));
+      CREATE TABLE IF NOT EXISTS receipts (visitor INTEGER NOT NULL, event_id TEXT NOT NULL, expires_at INTEGER NOT NULL, PRIMARY KEY(visitor, event_id));
+      CREATE INDEX IF NOT EXISTS receipts_expiry ON receipts(expires_at);
     `);
     // One-off rebuild of the events table: no AUTOINCREMENT (it writes an extra bookkeeping row per insert) and a
     // `via` column, so daily counts can be recomputed from the events themselves instead of counted per event.
@@ -138,13 +142,41 @@ export class SiteDO extends DurableObject<Env> {
    * until midnight UTC so a flood or a runaway site can't run up costs.
    */
   async ingest(siteId: number, ev: SiteEvent, cap = 0): Promise<IngestResult> {
+    const versionsBefore = new Map(this.dirtyVersion);
+    let result: IngestResult;
+    try {
+      result = this.ctx.storage.transactionSync(() => this.storeEvent(siteId, ev, cap));
+    } catch (error) {
+      // SQL rolled back; discard derived caches before a retry uses them.
+      this.today = null;
+      this.siteKnown = false;
+      this.cappedDay = undefined;
+      this.lastSeen = null;
+      this.seq = null;
+      this.liveCache.clear();
+      this.dirtyVersion = versionsBefore;
+      this.persistedDirty = new Set(this.sql.exec<{ key: string }>("SELECT key FROM meta WHERE key LIKE 'dirty:%'").toArray().map((r) => r.key.slice(6)));
+      throw error;
+    }
+    if (result === "ok" || result === "capped-first") this.schedulePush();
+    // A duplicate also repairs an alarm failure after a prior committed write.
+    if (this.persistedDirty.size > 0 && (await this.ctx.storage.getAlarm()) === null) {
+      await this.ctx.storage.setAlarm(Date.now() + FLUSH_INTERVAL_MS);
+    }
+    return result;
+  }
+
+  private storeEvent(siteId: number, ev: SiteEvent, cap: number): IngestResult {
+    if (ev.eventId && this.sql.exec(
+      "SELECT 1 FROM receipts WHERE event_id = ? AND visitor IN (?, ?) AND expires_at > ? LIMIT 1",
+      ev.eventId, ev.visitor, ev.prevVisitor ?? ev.visitor, Math.floor(Date.now() / 1000),
+    ).toArray().length > 0) return "duplicate";
     const eventDay = utcDay(ev.ts * 1000);
     if (this.cappedDay === undefined) this.cappedDay = this.meta(`capped:${eventDay}`) !== null ? eventDay : null;
     if (cap > 0 && this.todayCount(eventDay) >= cap) {
       if (this.cappedDay === eventDay) return "capped";
       this.setMeta(`capped:${eventDay}`, String(Math.floor(Date.now() / 1000)));
       this.cappedDay = eventDay;
-      this.schedulePush();
       return "capped-first";
     }
     if (this.cappedDay === eventDay) {
@@ -221,14 +253,13 @@ export class SiteDO extends DurableObject<Env> {
     );
 
     if (this.seq !== null) this.seq++;
-    this.schedulePush();
     this.markDirty(eventDay);
     if (startDay !== eventDay) this.markDirty(startDay);
     if (this.today?.day === eventDay) this.today.n++;
     if (this.lastSeen && ev.via && ev.ts > (this.lastSeen.get(ev.via) ?? 0)) this.lastSeen.set(ev.via, ev.ts);
 
-    if ((await this.ctx.storage.getAlarm()) === null) {
-      await this.ctx.storage.setAlarm(Date.now() + FLUSH_INTERVAL_MS);
+    if (ev.eventId) {
+      this.sql.exec("INSERT OR REPLACE INTO receipts (visitor, event_id, expires_at) VALUES (?, ?, ?)", ev.visitor, ev.eventId, Math.floor(Date.now() / 1000) + 3 * 86_400);
     }
     return "ok";
   }
@@ -238,6 +269,10 @@ export class SiteDO extends DurableObject<Env> {
     let kept = 0;
     for (const ev of evs) if ((await this.ingest(siteId, ev)) === "ok") kept++;
     return kept;
+  }
+
+  async query(timezone: string, spec: QuerySpec) {
+    return querySqlite(this.sql, timezone, spec);
   }
 
   async alarm(): Promise<void> {
@@ -326,6 +361,7 @@ export class SiteDO extends DurableObject<Env> {
 
   /** Drop local rows older than the retention window, unless their day is still waiting to be flushed. */
   private purge() {
+    this.sql.exec("DELETE FROM receipts WHERE expires_at <= ?", Math.floor(Date.now() / 1000));
     const cutoff = Math.floor(Date.now() / 1000) - LOCAL_RETENTION_S;
     const pending = new Set(
       this.sql.exec<{ key: string }>("SELECT key FROM meta WHERE key LIKE 'dirty:%'").toArray().map((r) => r.key.slice(6)),

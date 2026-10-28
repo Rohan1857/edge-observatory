@@ -1,3 +1,4 @@
+import { queries } from "./query-backend";
 import { Hono } from "hono";
 import { DIMENSIONS, validateSpec, type Dimension, type QuerySpec } from "@qwa/shared";
 import { joinRows, type BreakdownRow } from "./breakdown";
@@ -57,7 +58,7 @@ api.get("/me", async (c) => {
   const visible = await visibleSiteIds(c.env, user);
   const sites = (await allSites(c.env)).filter((s) => visible === "all" || visible.includes(s.id));
   const first = await firstDays(c.env);
-  return c.json({ user, sites: sites.map(({ id, domain, timezone }) => ({ id, domain, timezone, first_day: first.get(id) ?? todayIn(timezone) })) });
+  return c.json({ user, reporting: { mode: c.env.QUERY_MODE === "sqlite" ? "sqlite" : "duckdb", detailRetentionDays: 30 }, sites: sites.map(({ id, domain, timezone }) => ({ id, domain, timezone, first_day: first.get(id) ?? todayIn(timezone) })) });
 });
 
 /** Each site's first day with traffic (imported history included), or the day it was added: where "All" starts. */
@@ -155,12 +156,14 @@ api.get("/overview", async (c) => {
         let stats: DayStats = { ...EMPTY(d.day), ...d };
         if (!d.complete) {
           try {
-            const r = await c.env.QUERY.query(site.id, site.timezone, {
+            const fallbackSpec: QuerySpec = {
               from: d.start !== undefined ? todayIn(site.timezone, d.start * 1000) : d.day,
               to: d.end !== undefined ? todayIn(site.timezone, (d.end - 1) * 1000) : d.day,
               ...(d.start !== undefined ? { since: d.start, until: d.end } : {}),
               metrics: ["visitors", "visits", "pageviews", "events", "bounce_rate", "visit_duration"],
-            });
+            };
+            const files = await liveFor(c.env, site, [fallbackSpec]);
+            const r = await queries(c.env).query(site.id, site.timezone, fallbackSpec, files);
             const x = r.rows[0] ?? {};
             stats = {
               day: d.day, visitors: Number(x.visitors ?? 0), visits: Number(x.visits ?? 0), pageviews: Number(x.pageviews ?? 0), events: Number(x.events ?? 0),
@@ -195,6 +198,7 @@ api.get("/overview", async (c) => {
 
 /** Ranges reaching today (or yesterday, just after midnight) include events the site hasn't flushed to R2 yet. */
 async function liveFor(env: Env, site: Site, specs: QuerySpec[]): Promise<LiveFiles | undefined> {
+  if (env.QUERY_MODE === "sqlite") return undefined;
   const since = addDays(todayIn(site.timezone), -1);
   if (!specs.some((s) => s.to >= since)) return undefined;
   return env.SITE.get(env.SITE.idFromName(String(site.id))).liveFiles().catch((e) => {
@@ -239,7 +243,7 @@ api.post("/breakdown", async (c) => {
         const cut = prev.since !== undefined || prev.from !== prev.to ? null : sameTimeWindow(site.timezone, cur.from, cur.to, prev.to);
         const before = cut ? { ...prev, since: cut.start, until: cut.end } : prev;
         const live = await liveFor(c.env, site, [cur, before]);
-        const [a, b] = await Promise.all([c.env.QUERY.query(site.id, site.timezone, cur, live), c.env.QUERY.query(site.id, site.timezone, before, live)]);
+        const [a, b] = await Promise.all([queries(c.env).query(site.id, site.timezone, cur, live), queries(c.env).query(site.id, site.timezone, before, live)]);
         rows.push(...joinRows(site.id, dim, cur.metrics, a, b));
         if (a.rows.length >= limit) truncated.push(site.id);
       } catch (e) {
@@ -262,7 +266,7 @@ api.post("/sites/:site/query", async (c) => {
   }
   const live = await liveFor(c.env, site, [spec]);
   try {
-    return c.json(await c.env.QUERY.query(site.id, site.timezone, spec, live));
+    return c.json(await queries(c.env).query(site.id, site.timezone, spec, live));
   } catch (e) {
     console.error("query failed", e);
     return c.json({ error: `query failed: ${(e as Error).message}` }, 502);
@@ -294,7 +298,7 @@ api.post("/sites/:site/batch", async (c) => {
   const headers = { "content-type": "application/x-ndjson", "cache-control": "no-store" };
   if (!items.length) return new Response(invalid.join(""), { headers });
   const live = await liveFor(c.env, site, items.map((x) => x.spec));
-  const answers = await c.env.QUERY.queryMany(site.id, site.timezone, items, live);
+  const answers = await queries(c.env).queryMany(site.id, site.timezone, items, live);
   if (!invalid.length) return new Response(answers, { headers });
   const { readable, writable } = new IdentityTransformStream();
   c.executionCtx.waitUntil(
