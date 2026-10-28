@@ -1,6 +1,6 @@
 # Deployment
 
-The current demo uses local storage. The root `wrangler.free.example.jsonc` describes a hosted SQLite configuration: one Worker, a Durable Object per site, D1 and R2. It does not bind the optional DuckDB Worker. R2 can incur usage charges.
+The root `wrangler.free.example.jsonc` configures one Worker, a SQLite Durable Object per site, D1 and R2. The DuckDB archive Worker is optional. Check Cloudflare resource pricing before creating hosted storage.
 
 ## Configuration
 
@@ -36,9 +36,9 @@ npx wrangler deploy --dry-run -c wrangler.jsonc
 npx wrangler deploy -c wrangler.jsonc
 ```
 
-Use these explicit commands for the SQLite profile. The older `npm run deploy` script deploys the optional query Worker as well.
+Use these commands for the SQLite profile. The `npm run deploy` script deploys the optional query Worker as well.
 
-After deployment, check that `/t.js` is public, the dashboard requires Access sign-in, and a newly added site's events appear in its reports. Remote deployment and these hosted checks have not been run for the local demo.
+After deployment, check that `/t.js` is public, the dashboard requires Access sign-in, and a newly added site's events appear in its reports.
 
 ## Google data
 

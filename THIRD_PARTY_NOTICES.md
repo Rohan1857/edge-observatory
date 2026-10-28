@@ -1,5 +1,7 @@
 # Third-party notices
 
+Edge Observatory incorporates [Quick Web Analytics](https://github.com/Zesty0wl/quick-web-analytics), copyright (c) 2026 Neil Johnson, under the MIT licence. The copyright and licence text are preserved in [LICENSE](LICENSE).
+
 | Component | Licence | Used for |
 |---|---|---|
 | Plausible tracker scripts (compiled), © Plausible Insights OÜ | MIT | `packages/tracker-compat/` (full text in `LICENSE.md` there). Served only for Plausible-compatible ingestion during migration. |

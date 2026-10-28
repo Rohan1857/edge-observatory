@@ -54,12 +54,12 @@ npm run verify
 
 Runs type checks, unit tests, Durable Object integration tests, the dashboard build and a Worker bundle check. See [testing](docs/testing.md) for individual commands and failure cases.
 
-## Storage limits
+## Documentation
 
-The SQLite profile keeps 30 days of event detail and defaults to 1,000 accepted events per site per day. Daily totals are stored separately. Older Parquet archives need the optional query Worker for detailed reports.
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/DEPLOY.md)
+- [Testing](docs/testing.md)
 
-Duplicate receipts expire after 72 hours, but matching also depends on daily visitor identities. A changed identity or a retry after later salt rotations can count again. Expired data is cleaned up during archive flushes.
+## Licence
 
-The project currently runs locally. The event cap is not a billing cap; hosted R2 usage can incur charges. See [deployment](docs/DEPLOY.md) for the single-Worker configuration and [architecture](docs/architecture.md) for storage and query details.
-
-Based on [Quick Web Analytics](https://github.com/Zesty0wl/quick-web-analytics), under the [MIT licence](LICENSE). Dependency licences are listed in [third-party notices](THIRD_PARTY_NOTICES.md).
+[MIT](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES.md) for source and dependency credits.

@@ -31,4 +31,4 @@ The HTTP smoke check needs a running local server. Follow the setup in the [READ
 
 Query tests cover filters, traffic metrics, timezones, percentile interpolation and ranking, events after a session crosses midnight, and incomplete historical rollups. The SQL fixture generator is optional and skipped in the normal test run.
 
-These checks exercise local Workers storage. They do not measure production throughput or verify a hosted Cloudflare Access setup.
+Storage integration tests run against the local Workers runtime. For a hosted installation, also check Access sign-in and event ingestion as described in the [deployment guide](DEPLOY.md).
